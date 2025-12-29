@@ -1,0 +1,11 @@
+version: '3.8'
+
+services:
+  max-telegram-forwarder:
+    build: .
+    container_name: max-telegram-forwarder
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      - TZ=Europe/Moscow

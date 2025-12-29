@@ -1,0 +1,5 @@
+MaxBridge
+pyTelegramBotAPI
+python-dotenv
+colorama
+requests
