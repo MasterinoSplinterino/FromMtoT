@@ -24,6 +24,8 @@ TARGET_USER_ID = os.getenv("TARGET_USER_ID", "").strip()
 TARGET_USER_NAME = os.getenv("TARGET_USER_NAME", "").strip().lower()  # Фильтр по имени
 TG_BOT_TOKEN = os.getenv("TG_BOT_TOKEN")
 TG_CHAT_ID = int(os.getenv("TG_CHAT_ID", "0"))
+TG_TOPIC_ID_RAW = os.getenv("TG_TOPIC_ID", "").strip()
+TG_TOPIC_ID = int(TG_TOPIC_ID_RAW) if TG_TOPIC_ID_RAW else None
 
 # Парсим словарь имён из .env (формат: ID:Имя,ID:Имя)
 USER_NAMES_RAW = os.getenv("USER_NAMES", "")
@@ -98,7 +100,7 @@ def format_message_for_telegram(sender_name: str, text: str, timestamp: datetime
 def send_to_telegram(text: str, parse_mode: str = "HTML"):
     """Отправить сообщение в Telegram чат"""
     try:
-        tg_bot.send_message(TG_CHAT_ID, text, parse_mode=parse_mode)
+        tg_bot.send_message(TG_CHAT_ID, text, parse_mode=parse_mode, message_thread_id=TG_TOPIC_ID)
         logger.info(f"Сообщение отправлено в Telegram")
     except Exception as e:
         logger.error(f"Ошибка отправки в Telegram: {e}")
@@ -107,7 +109,7 @@ def send_to_telegram(text: str, parse_mode: str = "HTML"):
 def send_photo_to_telegram(photo_url: str, caption: str = ""):
     """Отправить фото в Telegram"""
     try:
-        tg_bot.send_photo(TG_CHAT_ID, photo_url, caption=caption, parse_mode="HTML")
+        tg_bot.send_photo(TG_CHAT_ID, photo_url, caption=caption, parse_mode="HTML", message_thread_id=TG_TOPIC_ID)
         logger.info(f"Фото отправлено в Telegram")
     except Exception as e:
         logger.error(f"Ошибка отправки фото в Telegram: {e}")
@@ -117,7 +119,7 @@ def send_document_to_telegram(doc_bytes: bytes, filename: str, caption: str = ""
     """Отправить документ в Telegram"""
     try:
         tg_bot.send_document(TG_CHAT_ID, doc_bytes, caption=caption,
-                            visible_file_name=filename, parse_mode="HTML")
+                            visible_file_name=filename, parse_mode="HTML", message_thread_id=TG_TOPIC_ID)
         logger.info(f"Документ {filename} отправлен в Telegram")
     except Exception as e:
         logger.error(f"Ошибка отправки документа в Telegram: {e}")
@@ -267,7 +269,7 @@ def run_max_listener():
 def main():
     """Главная функция"""
     logger.info("=" * 50)
-    logger.info("MAX → Telegram Forwarder Bot")
+    logger.info("MAX -> Telegram Forwarder Bot")
     logger.info("=" * 50)
 
     validate_config()
@@ -279,6 +281,8 @@ def main():
 
     logger.info(f"MAX чат: {MAX_CHAT_ID}")
     logger.info(f"Telegram чат: {TG_CHAT_ID}")
+    if TG_TOPIC_ID:
+        logger.info(f"Telegram топик: {TG_TOPIC_ID}")
     logger.info("=" * 50)
 
     # Запускаем слушатель MAX в отдельном потоке
