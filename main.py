@@ -306,9 +306,9 @@ def run_max_listener():
                 )
                 reconnect_count = 0
 
-            # Держим соединение и мониторим состояние
+            # Держим соединение и мониторим состояние (проверка раз в минуту)
             while True:
-                time.sleep(5)
+                time.sleep(60)
 
                 # Проверяем состояние соединения
                 if not max_api.is_running:
@@ -319,11 +319,16 @@ def run_max_listener():
             logger.error(error_msg)
             reconnect_count += 1
 
-            if reconnect_count == 1:
-                alert_admin(AlertType.DISCONNECT, error_msg)
+            # Уведомляем админа после 3 неудачных попыток
+            if reconnect_count == 3:
+                alert_admin(
+                    AlertType.DISCONNECT,
+                    f"{error_msg}\n\n"
+                    f"Не удалось подключиться после {reconnect_count} попыток."
+                )
 
         except ValueError as e:
-            # Ошибки авторизации (неверный токен и т.д.)
+            # Ошибки авторизации (неверный токен и т.д.) — сразу уведомляем
             error_msg = str(e)
             logger.error(f"Ошибка авторизации: {error_msg}")
 
@@ -344,11 +349,13 @@ def run_max_listener():
             logger.error(f"Ошибка соединения: {error_msg}")
             reconnect_count += 1
 
-            if reconnect_count == 1:
+            # Уведомляем админа после 3 неудачных попыток
+            if reconnect_count == 3:
                 alert_admin(
                     AlertType.DISCONNECT,
                     f"Потеряно соединение с MAX.\n\n{error_msg}\n\n"
-                    "Бот пытается переподключиться..."
+                    f"Не удалось восстановить после {reconnect_count} попыток.\n"
+                    "Бот продолжает попытки переподключения..."
                 )
             elif reconnect_count % 10 == 0:
                 # Каждые 10 попыток напоминаем
@@ -363,11 +370,13 @@ def run_max_listener():
             logger.error(f"Неизвестная ошибка MAX API: {error_msg}")
             reconnect_count += 1
 
-            if reconnect_count == 1:
+            # Уведомляем админа после 3 неудачных попыток
+            if reconnect_count == 3:
                 alert_admin(
                     AlertType.CRITICAL,
                     f"Произошла ошибка:\n\n{error_msg}\n\n"
-                    f"Тип: {type(e).__name__}"
+                    f"Тип: {type(e).__name__}\n"
+                    f"Не удалось восстановить после {reconnect_count} попыток."
                 )
 
         finally:
