@@ -1,9 +1,53 @@
+# Environment
 .env
+.env.local
+.env.*.local
+
+# Python cache
 __pycache__/
-*.pyc
+*.py[cod]
+*$py.class
 *.pyo
+*.pyd
+
+# Virtual environments
 .venv/
 venv/
+env/
+ENV/
+
+# Logs
 *.log
+logs/
+
+# IDE
 .idea/
 .vscode/
+*.swp
+*.swo
+*~
+
+# OS files
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Build/dist
+build/
+dist/
+*.egg-info/
+*.egg
+
+# pytest
+.pytest_cache/
+.coverage
+htmlcov/
+
+# mypy
+.mypy_cache/
+
+# Temp files
+*.tmp
+*.temp
+*.bak
+tmpclaude-*/

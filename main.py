@@ -11,7 +11,9 @@ from typing import Optional
 
 import telebot
 from dotenv import load_dotenv
-from MaxBridge import MaxAPI
+
+# Используем исправленную версию MaxAPI с надёжным реконнектом
+from max_api_fixed import MaxAPI
 
 from logger import setup_logger
 
@@ -26,6 +28,8 @@ TG_BOT_TOKEN = os.getenv("TG_BOT_TOKEN")
 TG_CHAT_ID = int(os.getenv("TG_CHAT_ID", "0"))
 TG_TOPIC_ID_RAW = os.getenv("TG_TOPIC_ID", "").strip()
 TG_TOPIC_ID = int(TG_TOPIC_ID_RAW) if TG_TOPIC_ID_RAW else None
+TG_ADMIN_ID_RAW = os.getenv("TG_ADMIN_ID", "").strip()
+TG_ADMIN_ID = int(TG_ADMIN_ID_RAW) if TG_ADMIN_ID_RAW else None
 
 # Парсим словарь имён из .env (формат: ID:Имя,ID:Имя)
 USER_NAMES_RAW = os.getenv("USER_NAMES", "")
@@ -46,6 +50,40 @@ max_api: Optional[MaxAPI] = None
 
 # Кэш контактов для получения имён (начинаем с заданных вручную)
 contacts_cache = USER_NAMES.copy()
+
+# Типы критических ошибок
+class AlertType:
+    DISCONNECT = "🔌 ДИСКОННЕКТ"
+    AUTH_ERROR = "🔐 ОШИБКА АВТОРИЗАЦИИ"
+    TOKEN_EXPIRED = "⏰ ТОКЕН ИСТЁК"
+    CONNECTION_FAILED = "❌ ОШИБКА ПОДКЛЮЧЕНИЯ"
+    RECONNECT = "🔄 ПЕРЕПОДКЛЮЧЕНИЕ"
+    RECONNECT_SUCCESS = "✅ ВОССТАНОВЛЕНО"
+    CRITICAL = "🚨 КРИТИЧЕСКАЯ ОШИБКА"
+
+
+def alert_admin(alert_type: str, message: str, is_critical: bool = True):
+    """Отправить срочное уведомление администратору в личку"""
+    if not TG_ADMIN_ID:
+        logger.warning("TG_ADMIN_ID не задан — уведомление администратору не отправлено")
+        return
+
+    timestamp = datetime.now().strftime("%d.%m.%Y %H:%M:%S")
+
+    alert_text = (
+        f"{alert_type}\n"
+        f"━━━━━━━━━━━━━━━━━━━━\n"
+        f"🕐 {timestamp}\n\n"
+        f"{message}\n"
+        f"━━━━━━━━━━━━━━━━━━━━\n"
+        f"🤖 MAX → Telegram Bot"
+    )
+
+    try:
+        tg_bot.send_message(TG_ADMIN_ID, alert_text, parse_mode=None)
+        logger.info(f"Уведомление отправлено администратору: {alert_type}")
+    except Exception as e:
+        logger.error(f"Не удалось отправить уведомление администратору: {e}")
 
 
 def validate_config():
@@ -247,6 +285,9 @@ def run_max_listener():
     """Запуск слушателя MAX"""
     global max_api
 
+    reconnect_count = 0
+    last_disconnect_time = None
+
     while True:
         try:
             logger.info("Подключение к MAX...")
@@ -256,14 +297,92 @@ def run_max_listener():
             max_api.subscribe_to_chat(MAX_CHAT_ID)
             logger.info(f"Подписка на чат {MAX_CHAT_ID} активна")
 
-            # Держим соединение
+            # Если это было переподключение — уведомляем об успехе
+            if reconnect_count > 0:
+                alert_admin(
+                    AlertType.RECONNECT_SUCCESS,
+                    f"Соединение восстановлено после {reconnect_count} попыток.\n"
+                    f"Подписка на чат {MAX_CHAT_ID} активна."
+                )
+                reconnect_count = 0
+
+            # Держим соединение и мониторим состояние
             while True:
-                time.sleep(1)
+                time.sleep(5)
+
+                # Проверяем состояние соединения
+                if not max_api.is_running:
+                    raise ConnectionError("Соединение потеряно")
+
+        except TimeoutError as e:
+            error_msg = f"Таймаут подключения: {e}"
+            logger.error(error_msg)
+            reconnect_count += 1
+
+            if reconnect_count == 1:
+                alert_admin(AlertType.DISCONNECT, error_msg)
+
+        except ValueError as e:
+            # Ошибки авторизации (неверный токен и т.д.)
+            error_msg = str(e)
+            logger.error(f"Ошибка авторизации: {error_msg}")
+
+            if "Auth Error" in error_msg or "token" in error_msg.lower():
+                alert_admin(
+                    AlertType.AUTH_ERROR,
+                    f"Проблема с токеном MAX!\n\n{error_msg}\n\n"
+                    "Возможно, токен истёк или был отозван. "
+                    "Требуется обновить MAX_AUTH_TOKEN в .env"
+                )
+            else:
+                alert_admin(AlertType.CRITICAL, error_msg)
+
+            reconnect_count += 1
+
+        except ConnectionError as e:
+            error_msg = str(e)
+            logger.error(f"Ошибка соединения: {error_msg}")
+            reconnect_count += 1
+
+            if reconnect_count == 1:
+                alert_admin(
+                    AlertType.DISCONNECT,
+                    f"Потеряно соединение с MAX.\n\n{error_msg}\n\n"
+                    "Бот пытается переподключиться..."
+                )
+            elif reconnect_count % 10 == 0:
+                # Каждые 10 попыток напоминаем
+                alert_admin(
+                    AlertType.RECONNECT,
+                    f"Попытка переподключения #{reconnect_count}\n\n"
+                    f"Соединение не восстановлено уже {reconnect_count} попыток."
+                )
 
         except Exception as e:
-            logger.error(f"Ошибка MAX API: {e}")
-            logger.info("Переподключение через 10 секунд...")
-            time.sleep(10)
+            error_msg = str(e)
+            logger.error(f"Неизвестная ошибка MAX API: {error_msg}")
+            reconnect_count += 1
+
+            if reconnect_count == 1:
+                alert_admin(
+                    AlertType.CRITICAL,
+                    f"Произошла ошибка:\n\n{error_msg}\n\n"
+                    f"Тип: {type(e).__name__}"
+                )
+
+        finally:
+            # Закрываем старое соединение
+            if max_api:
+                try:
+                    max_api.close()
+                except:
+                    pass
+                max_api = None
+
+        # Задержка перед переподключением с экспоненциальным увеличением
+        delay = min(10 * (2 ** min(reconnect_count - 1, 4)), 300)  # макс 5 минут
+        logger.info(f"Переподключение через {delay} секунд... (попытка #{reconnect_count})")
+        time.sleep(delay)
 
 
 def main():
@@ -283,6 +402,10 @@ def main():
     logger.info(f"Telegram чат: {TG_CHAT_ID}")
     if TG_TOPIC_ID:
         logger.info(f"Telegram топик: {TG_TOPIC_ID}")
+    if TG_ADMIN_ID:
+        logger.info(f"Уведомления администратору: {TG_ADMIN_ID}")
+    else:
+        logger.warning("TG_ADMIN_ID не задан — срочные уведомления отключены")
     logger.info("=" * 50)
 
     # Запускаем слушатель MAX в отдельном потоке
